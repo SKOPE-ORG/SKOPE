@@ -22,6 +22,6 @@ export interface Workspace {
   createdAt: number
   updatedAt: number
   collapsed: boolean
-  /** Stable SKOPE IDs for future saved tab-group records; never Chrome's session group IDs. */
+  /** Stable SKOPE tab-group link IDs; never Chrome's session group IDs. */
   tabGroupIds: string[]
 }
