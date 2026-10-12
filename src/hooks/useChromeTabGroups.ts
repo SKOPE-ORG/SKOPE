@@ -1,75 +1,46 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
+import type { ChromeTabGroupSnapshot } from '../types/tabGroup'
 import {
-  queryChromeTabGroups,
-  subscribeToChromeTabGroupChanges,
-  type ChromeTabGroupState,
-} from '../services/chromeTabGroups'
-
-const EMPTY_STATE: ChromeTabGroupState = { groups: [], ungroupedTabs: [], windowId: null }
+  ChromeTabGroupSync,
+  EMPTY_CHROME_TAB_GROUP_STATE,
+} from '../services/chromeTabGroupSync'
 
 export function useChromeTabGroups(
   enabled: boolean,
   onGroupRemoved?: (groupId: number) => void,
+  onGroupsChanged?: (groups: ChromeTabGroupSnapshot[], previous: ChromeTabGroupSnapshot[]) => void,
 ) {
-  const [state, setState] = useState(EMPTY_STATE)
+  const [state, setState] = useState(EMPTY_CHROME_TAB_GROUP_STATE)
   const [loading, setLoading] = useState(enabled)
   const [error, setError] = useState<string | null>(null)
-  const requestId = useRef(0)
+  const syncRef = useRef<ChromeTabGroupSync | null>(null)
+  const notifyRemoved = useEffectEvent((groupId: number) => onGroupRemoved?.(groupId))
+  const notifyGroups = useEffectEvent((groups: ChromeTabGroupSnapshot[], previous: ChromeTabGroupSnapshot[]) =>
+    onGroupsChanged?.(groups, previous))
 
-  const refresh = useCallback(async (): Promise<ChromeTabGroupState | null> => {
-    if (!enabled) return null
-    const thisRequest = ++requestId.current
-    setLoading(true)
-    setError(null)
-    try {
-      const next = await queryChromeTabGroups()
-      if (thisRequest === requestId.current) setState(next)
-      return next
-    } catch (loadError) {
-      if (thisRequest === requestId.current) {
-        setState(EMPTY_STATE)
-        setError(loadError instanceof Error ? loadError.message : 'Could not read Chrome tab groups.')
-      }
-      return null
-    } finally {
-      if (thisRequest === requestId.current) setLoading(false)
-    }
-  }, [enabled])
+  const refresh = useCallback(() => syncRef.current?.refresh() ?? Promise.resolve(null), [])
 
   useEffect(() => {
     if (!enabled) return
-
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let subscriptionErrorTimer: ReturnType<typeof setTimeout> | undefined
-    const scheduleRefresh = () => {
-      if (timer !== undefined) clearTimeout(timer)
-      timer = setTimeout(() => {
-        timer = undefined
-        void refresh()
-      }, 120)
+    const sync = new ChromeTabGroupSync({
+      onState: (next, previous) => { setState(next); notifyGroups(next.groups, previous.groups) },
+      onStatus: (nextLoading, nextError) => { setLoading(nextLoading); setError(nextError) },
+      onGroupRemoved: (groupId) => notifyRemoved(groupId),
+    })
+    syncRef.current = sync
+    sync.start()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void sync.refresh()
     }
-
-    let unsubscribe: (() => void) | undefined
-    try {
-      unsubscribe = subscribeToChromeTabGroupChanges(scheduleRefresh, onGroupRemoved)
-    } catch (subscriptionError) {
-      subscriptionErrorTimer = setTimeout(() => {
-        setError(
-          subscriptionError instanceof Error
-            ? subscriptionError.message
-            : 'Could not watch Chrome tab groups.',
-        )
-      }, 0)
-    }
-    void refresh()
-
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
     return () => {
-      if (timer !== undefined) clearTimeout(timer)
-      if (subscriptionErrorTimer !== undefined) clearTimeout(subscriptionErrorTimer)
-      requestId.current += 1
-      unsubscribe?.()
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+      sync.dispose()
+      syncRef.current = null
     }
-  }, [enabled, onGroupRemoved, refresh])
+  }, [enabled])
 
   return { ...state, loading, error, refresh }
 }
