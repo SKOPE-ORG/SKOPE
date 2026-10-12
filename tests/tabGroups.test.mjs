@@ -13,6 +13,7 @@ const modules = [
   'services/workspaceTabGroups', 'services/workspaceStorage',
   'types/tabGroup', 'types/workspace',
   'services/workspaceGroupColors',
+  'services/workspaceGroupSession', 'services/workspaceDeletion',
 ]
 for (const module of modules) {
   const source = await readFile(new URL(`../src/${module}.ts`, import.meta.url), 'utf8')
@@ -29,6 +30,8 @@ const { ChromeTabGroupSync } = await import(pathToFileURL(join(directory, 'servi
 const { resolveWorkspaceTabGroupLinks } = await import(pathToFileURL(join(directory, 'services/workspaceTabGroups.js')))
 const { loadWorkspaceState, saveWorkspaceState } = await import(pathToFileURL(join(directory, 'services/workspaceStorage.js')))
 const { workspaceColorToChromeColor, getWorkspaceGroupColorUpdates } = await import(pathToFileURL(join(directory, 'services/workspaceGroupColors.js')))
+const { deleteWorkspaceAndUngroup } = await import(pathToFileURL(join(directory, 'services/workspaceDeletion.js')))
+const { loadWorkspaceGroupBindings, rememberWorkspaceGroupBindings } = await import(pathToFileURL(join(directory, 'services/workspaceGroupSession.js')))
 after(async () => { delete globalThis.chrome; await rm(directory, { recursive: true }) })
 
 const fingerprint = 'a'.repeat(64)
@@ -289,4 +292,188 @@ test('stored color policies round-trip; legacy policies remain absent and invali
   }
   await assert.rejects(saveWorkspaceState([violetWorkspace], [{ ...links[0], colorMode: 'invalid' }]), /invalid/)
   assert.equal(writes, 3)
+})
+
+async function deletionFixture() {
+  const fixture = {
+    groups: [10, 20, 30].map((id) => ({ id, title: `Group ${id}`, color: 'blue', windowId: id === 10 ? 1 : 2, collapsed: false })),
+    tabs: [tab(1, 10), tab(2, 10), { ...tab(3, 20), windowId: 2 }, { ...tab(4, 30), windowId: 2 }, tab(5, -1)],
+    session: {}, ungroupCalls: [], localWrites: 0, sessionWrites: 0,
+    failures: new Set(), failSave: false, failQuery: false, failSessionCleanup: false, keepGroup: false,
+  }
+  const select = (query, items) => structuredClone(items.filter((item) =>
+    (query.windowId === undefined || item.windowId === query.windowId) &&
+    (query.groupId === undefined || item.groupId === query.groupId)))
+  globalThis.chrome = {
+    runtime: { id: 'test' },
+    tabGroups: { TAB_GROUP_ID_NONE: -1, query: async (query) => {
+      if (fixture.failQuery) throw new Error('Chrome unavailable')
+      return select(query, fixture.groups)
+    } },
+    tabs: {
+      query: async (query) => query.active ? [tab(1)] : select(query, fixture.tabs),
+      ungroup: async (ids) => {
+        const groupId = fixture.tabs.find((item) => item.id === ids[0]).groupId
+        fixture.ungroupCalls.push([...ids])
+        if (fixture.failures.has(groupId)) throw new Error('Ungroup failed')
+        if (fixture.keepGroup) return
+        fixture.tabs.forEach((item) => { if (ids.includes(item.id)) item.groupId = -1 })
+        fixture.groups = fixture.groups.filter((item) => fixture.tabs.some((member) => member.groupId === item.id))
+      },
+    },
+    storage: {
+      local: {
+        get: async () => ({ 'skope.workspaceState.v1': structuredClone(fixture.saved) }),
+        set: async (data) => {
+          if (fixture.failSave) throw new Error('Storage write failed')
+          fixture.localWrites++
+          fixture.saved = structuredClone(data['skope.workspaceState.v1'])
+        },
+      },
+      session: {
+        get: async (keys) => Object.fromEntries(Object.entries(structuredClone(fixture.session)).filter(([key]) => keys == null || keys.includes(key))),
+        set: async (data) => { fixture.sessionWrites++; Object.assign(fixture.session, structuredClone(data)) },
+        remove: async (keys) => {
+          if (fixture.failSessionCleanup) throw new Error('Session write failed')
+          keys.forEach((key) => { delete fixture.session[key] })
+        },
+      },
+    },
+  }
+  const live = await queryChromeTabGroups('all')
+  const target = { ...violetWorkspace, id: 'target', tabGroupIds: ['link-10', 'link-20'] }
+  const other = { ...violetWorkspace, id: 'other', name: 'Keep', color: '#D45C7C', order: 1, tabGroupIds: ['link-30'] }
+  fixture.saved = {
+    schemaVersion: 1, workspaces: [target, other],
+    tabGroupLinks: live.groups.map((item) => ({ id: `link-${item.id}`, workspaceId: item.id === 30 ? 'other' : 'target', fingerprint: item.fingerprint, createdAt: 1, updatedAt: 1, colorMode: 'workspace' })),
+  }
+  fixture.before = structuredClone(fixture.saved)
+  return fixture
+}
+
+test('Workspace deletion ungroups all linked windows, preserves every tab and other Workspace groups', async () => {
+  const f = await deletionFixture()
+  const result = await deleteWorkspaceAndUngroup('target')
+  assert.deepEqual(f.ungroupCalls.flat().sort(), [1, 2, 3])
+  assert.equal(f.tabs.length, 5)
+  assert.deepEqual(f.tabs.map((item) => item.groupId), [-1, -1, -1, 30, -1])
+  assert.deepEqual((await queryChromeTabGroups('all')).groups.map((item) => item.id), [30])
+  assert.deepEqual(result.workspaces.map((item) => item.id), ['other'])
+  assert.equal(result.workspaces[0].name, 'Keep')
+  assert.equal(result.workspaces[0].color, '#D45C7C')
+  assert.deepEqual(result.tabGroupLinks, [f.before.tabGroupLinks[2]])
+  assert.equal(f.localWrites, 1)
+})
+
+test('partial ungroup failure keeps local records; retry handles only remaining groups', async () => {
+  const f = await deletionFixture()
+  f.failures.add(20)
+  await assert.rejects(deleteWorkspaceAndUngroup('target'), /1 of 2/)
+  assert.deepEqual(f.saved, f.before)
+  assert.deepEqual(f.groups.map((item) => item.id), [20, 30])
+  assert.equal(f.localWrites, 0)
+  f.failures.clear()
+  await deleteWorkspaceAndUngroup('target')
+  assert.equal(f.ungroupCalls.filter((ids) => ids.includes(1)).length, 1)
+  assert.equal(f.tabs.length, 5)
+  assert.deepEqual(f.saved.workspaces.map((item) => item.id), ['other'])
+})
+
+test('query failure aborts before Chrome mutations or local cleanup', async () => {
+  const f = await deletionFixture()
+  f.failQuery = true
+  await assert.rejects(deleteWorkspaceAndUngroup('target'), /Chrome unavailable/)
+  assert.deepEqual(f.ungroupCalls, [])
+  assert.deepEqual(f.saved, f.before)
+})
+
+test('deleting saved-only references performs no Chrome mutation and preserves other live groups', async () => {
+  const f = await deletionFixture()
+  f.tabs.forEach((item) => { if (item.groupId === 10 || item.groupId === 20) item.groupId = -1 })
+  f.groups = f.groups.filter((item) => item.id === 30)
+  await deleteWorkspaceAndUngroup('target')
+  assert.deepEqual(f.ungroupCalls, [])
+  assert.equal(f.tabs.length, 5)
+  assert.deepEqual(f.saved.workspaces.map((item) => item.id), ['other'])
+  assert.deepEqual(f.groups.map((item) => item.id), [30])
+})
+
+test('local-save failure after ungrouping retains records and retries without touching tabs again', async () => {
+  const f = await deletionFixture()
+  f.failSave = true
+  await assert.rejects(deleteWorkspaceAndUngroup('target'), /records could not be saved/)
+  assert.deepEqual(f.saved, f.before)
+  const calls = f.ungroupCalls.length
+  f.failSave = false
+  await deleteWorkspaceAndUngroup('target')
+  assert.equal(f.ungroupCalls.length, calls)
+  assert.equal(f.tabs.length, 5)
+})
+
+test('session cleanup failure does not remove Workspace records', async () => {
+  const f = await deletionFixture()
+  f.failSessionCleanup = true
+  await assert.rejects(deleteWorkspaceAndUngroup('target'), /Session write failed/)
+  assert.deepEqual(f.saved, f.before)
+  f.failSessionCleanup = false
+  await deleteWorkspaceAndUngroup('target')
+  assert.deepEqual(f.saved.workspaces.map((item) => item.id), ['other'])
+})
+
+test('a successful API return that leaves a group intact cannot trigger saved-data deletion', async () => {
+  const f = await deletionFixture()
+  f.keepGroup = true
+  await assert.rejects(deleteWorkspaceAndUngroup('target'), /could not be ungrouped/)
+  assert.deepEqual(f.saved, f.before)
+  assert.equal(f.groups.length, 3)
+})
+
+test('ambiguous identical group signatures abort before modifying any user group', async () => {
+  const f = await deletionFixture()
+  f.tabs.find((item) => item.id === 3).url = f.tabs.find((item) => item.id === 4).url
+  const live = await queryChromeTabGroups('all')
+  for (const item of live.groups) f.saved.tabGroupLinks.find((link) => link.id === `link-${item.id}`).fingerprint = item.fingerprint
+  const before = structuredClone(f.saved)
+  await assert.rejects(deleteWorkspaceAndUngroup('target'), /identical saved signatures/)
+  assert.deepEqual(f.ungroupCalls, [])
+  assert.deepEqual(f.saved, before)
+})
+
+test('session mappings identify changed group contents in another window and preserve other groups', async () => {
+  const f = await deletionFixture()
+  await rememberWorkspaceGroupBindings({ 10: 'link-10', 20: 'link-20', 30: 'link-30' })
+  f.tabs.find((item) => item.id === 3).url = 'https://changed.example.test/'
+  await deleteWorkspaceAndUngroup('target')
+  assert.deepEqual(f.ungroupCalls.flat().sort(), [1, 2, 3])
+  assert.deepEqual(await loadWorkspaceGroupBindings(), { 30: 'link-30' })
+  assert.deepEqual(f.groups.map((item) => item.id), [30])
+})
+
+test('session cache preserves other windows and avoids repeated unchanged writes', async () => {
+  const f = await deletionFixture()
+  await rememberWorkspaceGroupBindings({ 20: 'link-20' })
+  await rememberWorkspaceGroupBindings({ 10: 'link-10' })
+  await rememberWorkspaceGroupBindings({ 10: 'link-10' })
+  assert.equal(f.sessionWrites, 2)
+  assert.deepEqual(await loadWorkspaceGroupBindings(), { 10: 'link-10', 20: 'link-20' })
+  assert.deepEqual(f.saved, f.before)
+  assert.ok(!JSON.stringify(f.saved).includes('groupId'))
+})
+
+test('a group reassigned before the operation is not ungrouped from its new Workspace', async () => {
+  const f = await deletionFixture()
+  let reads = 0
+  const get = globalThis.chrome.storage.local.get
+  globalThis.chrome.storage.local.get = async () => {
+    if (++reads === 2) {
+      f.saved.tabGroupLinks.find((link) => link.id === 'link-10').workspaceId = 'other'
+      f.saved.workspaces[0].tabGroupIds = ['link-20']
+      f.saved.workspaces[1].tabGroupIds.push('link-10')
+    }
+    return get()
+  }
+  await assert.rejects(deleteWorkspaceAndUngroup('target'), /could not be ungrouped/)
+  assert.ok(f.groups.some((item) => item.id === 10))
+  assert.ok(!f.ungroupCalls.flat().includes(1))
+  assert.ok(f.saved.workspaces[1].tabGroupIds.includes('link-10'))
 })

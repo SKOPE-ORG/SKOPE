@@ -45,7 +45,7 @@ npm run build
 - `tabGroups`: query live group metadata and update a newly created group's name/color.
 - `tabs`: read tab titles/URLs/favicons, activate tabs, and group selected ungrouped tabs.
 
-Workspace deletion only removes the workspace record from SKOPE; it does not close Chrome tabs or delete Chrome tab groups. SKOPE stores workspace data on this device and does not send it to an external server.
+Workspace deletion ungroups its linked active Chrome groups across all Chrome windows using `chrome.tabs.ungroup()`. Website tabs remain open. Saved records are removed only after every identified group is confirmed ungrouped; failures keep the Workspace available for retry. Other Workspaces and ordinary tabs are preserved. SKOPE stores data on this device and does not send it to an external server.
 
 Workspace records have SKOPE-generated IDs and an ordered list of SKOPE tab-group reference IDs. Chrome's numeric tab-group IDs are session identifiers and are not used as permanent workspace references.
 
@@ -60,3 +60,5 @@ The side panel supports Workspace management and classification of live Chrome t
 See [tab-group synchronization verification](docs/tab-group-sync-verification.md) for regression coverage and Chrome restart/manual checks.
 
 New groups default to following the Workspace color. Existing imports and legacy saved links keep Chrome colors until explicitly set to Follow Workspace. See [color policies and Chrome verification](docs/workspace-group-color-verification.md).
+
+Session-only group IDs are cached in `chrome.storage.session` for cross-window identity while the extension is loaded. They are not permanent Workspace keys. See [Workspace deletion verification](docs/workspace-deletion-verification.md).
