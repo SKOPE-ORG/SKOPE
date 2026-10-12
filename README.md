@@ -46,6 +46,10 @@ Workspace deletion only removes the workspace record from SKOPE; it does not clo
 
 Workspace records have SKOPE-generated IDs and an ordered list of SKOPE tab-group reference IDs. Chrome's numeric tab-group IDs are session identifiers and are not used as permanent workspace references.
 
+## Branding assets
+
+The official blue Glossy Orbital artwork is stored in `public/icons/`. The 16, 32, 48, and 128px files are used by Chrome; larger PNGs and `skope-logo.png` preserve the high-resolution artwork. Future macOS app assets are kept in `desktop/icon.icns` and `desktop/icon.png`.
+
 ## Current scope
 
 The side panel supports workspace creation, editing (name, icon, and color), ordering, collapse/expand, and deletion. Workspace data persists locally in Chrome Storage. Connecting workspaces to live Chrome tab groups and saving/restoring tab groups remain tracked separately in the [v0.1 MVP milestone](https://github.com/SKOPE-ORG/SKOPE/milestone/1).
