@@ -108,7 +108,7 @@ export async function ungroupChromeTabGroup(groupId: number): Promise<void> {
   if (!(await api.tabGroups.query({})).some((group) => group.id === groupId)) return
   const members = await api.tabs.query({ groupId })
   if (members.some((tab) => tab.id === undefined || tab.groupId !== groupId)) {
-    throw new Error('Chrome group membership changed. Retry deletion.')
+    throw new Error('Chrome group membership changed. Try ungrouping again.')
   }
   const ids = members.map((tab) => tab.id!)
   if (ids.length > 0) await api.tabs.ungroup([ids[0], ...ids.slice(1)])
@@ -116,7 +116,7 @@ export async function ungroupChromeTabGroup(groupId: number): Promise<void> {
     api.tabs.query({ groupId }), api.tabGroups.query({}),
   ])
   if (remaining.length > 0 || groups.some((group) => group.id === groupId)) {
-    throw new Error('Chrome still reports this group. Your Workspace has been kept; retry deletion.')
+    throw new Error('Chrome still reports this group. Try ungrouping again; your saved Workspace data is preserved.')
   }
 }
 

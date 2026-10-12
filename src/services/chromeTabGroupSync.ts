@@ -32,17 +32,22 @@ export class ChromeTabGroupSync {
       this.unsubscribe = (this.options.subscribe ?? subscribeToChromeTabGroupChanges)(
         () => this.scheduleRefresh(),
         (groupId) => {
-          if (this.disposed) return
-          // A query begun before onRemoved may still contain the deleted group.
-          this.revision += 1
-          this.publish({ ...this.state, groups: this.state.groups.filter((group) => group.id !== groupId) })
-          this.options.onGroupRemoved?.(groupId)
+          this.confirmGroupRemoved(groupId)
         },
       )
       void this.refresh()
     } catch (error) {
       this.options.onStatus(false, error instanceof Error ? error.message : 'Could not watch Chrome tab groups.')
     }
+  }
+
+  /** Call only after Chrome confirms absence, or from Chrome's onRemoved event. */
+  confirmGroupRemoved(groupId: number): void {
+    if (this.disposed) return
+    this.revision += 1
+    this.publish({ ...this.state, groups: this.state.groups.filter((group) => group.id !== groupId) })
+    this.options.onGroupRemoved?.(groupId)
+    this.scheduleRefresh()
   }
 
   private publish(next: ChromeTabGroupState): void {
