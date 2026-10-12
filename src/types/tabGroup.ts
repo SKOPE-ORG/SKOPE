@@ -6,7 +6,11 @@ export interface WorkspaceTabGroupLink {
   fingerprint: string
   createdAt: number
   updatedAt: number
+  /** Missing in legacy data means preserve the existing Chrome color. */
+  colorMode?: TabGroupColorMode
 }
+
+export type TabGroupColorMode = 'workspace' | 'chrome'
 
 export interface ChromeTabItem {
   /** Chrome tab ID; kept in memory only. */

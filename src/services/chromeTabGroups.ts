@@ -97,6 +97,12 @@ export async function activateChromeTab(tabId: number): Promise<void> {
   if (!tab) throw new Error('That Chrome tab is no longer available.')
 }
 
+export async function updateChromeTabGroupColor(groupId: number, color: ChromeTabGroupColor): Promise<void> {
+  const api = getChromeApi()
+  const group = await api.tabGroups.get(groupId)
+  if (group.color !== color) await api.tabGroups.update(groupId, { color })
+}
+
 export async function createChromeTabGroup(
   tabIds: number[],
   windowId: number,

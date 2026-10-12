@@ -64,7 +64,8 @@ function isTabGroupLink(value: unknown): value is WorkspaceTabGroupLink {
     typeof value.createdAt === 'number' &&
     Number.isFinite(value.createdAt) &&
     typeof value.updatedAt === 'number' &&
-    Number.isFinite(value.updatedAt)
+    Number.isFinite(value.updatedAt) &&
+    (value.colorMode === undefined || value.colorMode === 'workspace' || value.colorMode === 'chrome')
   )
 }
 
