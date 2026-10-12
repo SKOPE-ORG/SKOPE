@@ -1,0 +1,101 @@
+.panel {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  padding: 24px 20px 18px;
+  box-sizing: border-box;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  color: #fff;
+  background: #7154cf;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.eyebrow {
+  margin: 0 0 2px;
+  color: #8a8792;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+h1 {
+  margin: 0;
+  color: #24212c;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.version {
+  margin-left: auto;
+  padding: 3px 7px;
+  border: 1px solid #eae8ee;
+  border-radius: 6px;
+  color: #827e89;
+  font-size: 10px;
+}
+
+.welcome-card {
+  margin-top: 34px;
+  padding: 18px;
+  border: 1px solid #eceaf0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.welcome-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  color: #7154cf;
+  background: #f3f0fc;
+  font-size: 18px;
+}
+
+h2 {
+  margin: 16px 0 7px;
+  color: #24212c;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.welcome-card p {
+  margin: 0;
+  color: #77737f;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+code {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #eceaf0;
+  border-radius: 8px;
+  color: #5c4a91;
+  background: #faf9fc;
+  font-size: 11px;
+}
+
+footer {
+  margin-top: auto;
+  padding-top: 24px;
+  color: #9a97a1;
+  font-size: 10px;
+  text-align: center;
+}
