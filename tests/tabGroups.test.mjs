@@ -12,6 +12,7 @@ const modules = [
   'services/chromeTabGroups', 'services/chromeTabGroupSync',
   'services/workspaceTabGroups', 'services/workspaceStorage',
   'types/tabGroup', 'types/workspace',
+  'services/workspaceGroupColors',
 ]
 for (const module of modules) {
   const source = await readFile(new URL(`../src/${module}.ts`, import.meta.url), 'utf8')
@@ -23,10 +24,11 @@ for (const module of modules) {
   await writeFile(target, output)
 }
 await writeFile(join(directory, 'package.json'), '{"type":"module"}')
-const { queryChromeTabGroups, subscribeToChromeTabGroupChanges } = await import(pathToFileURL(join(directory, 'services/chromeTabGroups.js')))
+const { queryChromeTabGroups, subscribeToChromeTabGroupChanges, createChromeTabGroup, updateChromeTabGroupColor } = await import(pathToFileURL(join(directory, 'services/chromeTabGroups.js')))
 const { ChromeTabGroupSync } = await import(pathToFileURL(join(directory, 'services/chromeTabGroupSync.js')))
 const { resolveWorkspaceTabGroupLinks } = await import(pathToFileURL(join(directory, 'services/workspaceTabGroups.js')))
-const { loadWorkspaceState } = await import(pathToFileURL(join(directory, 'services/workspaceStorage.js')))
+const { loadWorkspaceState, saveWorkspaceState } = await import(pathToFileURL(join(directory, 'services/workspaceStorage.js')))
+const { workspaceColorToChromeColor, getWorkspaceGroupColorUpdates } = await import(pathToFileURL(join(directory, 'services/workspaceGroupColors.js')))
 after(async () => { delete globalThis.chrome; await rm(directory, { recursive: true }) })
 
 const fingerprint = 'a'.repeat(64)
@@ -199,4 +201,92 @@ test('legacy Workspace documents remain readable and are not rewritten during lo
   assert.deepEqual(await loadWorkspaceState(), { workspaces: [], tabGroupLinks: [] })
   assert.equal(writes, 0)
   assert.deepEqual(saved, { schemaVersion: 1, workspaces: [] })
+})
+
+test('every Workspace palette maps to a supported Chrome color, including violet/purple and rose/pink', () => {
+  const cases = [['#64748B', 'grey'], ['#4385E5', 'blue'], ['#2A9D8F', 'cyan'], ['#D79232', 'orange'], ['#D45C7C', 'pink'], ['#7655D7', 'purple']]
+  for (const [hex, namedColor] of cases) assert.equal(workspaceColorToChromeColor(hex), namedColor)
+  assert.equal(new Set(cases.map(([hex]) => workspaceColorToChromeColor(hex))).size, 6)
+})
+
+test('new Chrome groups receive distinct mapped colors rather than a fixed blue default', async () => {
+  const updates = []
+  mockChrome([], [tab(1, -1)])
+  globalThis.chrome.tabs.group = async () => 100 + updates.length
+  globalThis.chrome.tabGroups.update = async (id, changes) => { updates.push({ id, ...changes }) }
+  for (const color of ['#7655D7', '#4385E5', '#D45C7C']) {
+    await createChromeTabGroup([1], 1, 'QA', workspaceColorToChromeColor(color))
+  }
+  assert.deepEqual(updates.map((item) => item.color), ['purple', 'blue', 'pink'])
+})
+
+const violetWorkspace = { ...workspace, color: '#7655D7' }
+const followingLinks = [{ ...links[0], colorMode: 'workspace' }]
+
+test('legacy and keep-Chrome links never produce automatic recolor operations', () => {
+  for (const records of [links, [{ ...links[0], colorMode: 'chrome' }]]) {
+    assert.deepEqual(getWorkspaceGroupColorUpdates([violetWorkspace], records, [group()], { 10: 'link-uuid' }), [])
+  }
+})
+
+test('Workspace edits recolor only explicitly following live groups and preserve other user groups', () => {
+  const dataBefore = structuredClone({ workspace: violetWorkspace, links: followingLinks })
+  assert.deepEqual(getWorkspaceGroupColorUpdates([violetWorkspace], followingLinks, [group(), group(88)], { 10: 'link-uuid' }), [
+    { groupId: 10, linkId: 'link-uuid', color: 'purple' },
+  ])
+  assert.deepEqual({ workspace: violetWorkspace, links: followingLinks }, dataBefore)
+  assert.deepEqual(getWorkspaceGroupColorUpdates([{ ...violetWorkspace, color: '#D45C7C' }], followingLinks, [group()], { 10: 'link-uuid' })[0].color, 'pink')
+})
+
+test('reassigning a following group uses the destination Workspace palette; preserve mode has no update', () => {
+  const destination = { ...violetWorkspace, id: 'destination', color: '#D45C7C' }
+  const moved = { ...followingLinks[0], workspaceId: destination.id }
+  assert.equal(getWorkspaceGroupColorUpdates([destination], [moved], [group()], { 10: moved.id })[0].color, 'pink')
+  assert.deepEqual(getWorkspaceGroupColorUpdates([destination], [{ ...moved, colorMode: 'chrome' }], [group()], { 10: moved.id }), [])
+})
+
+test('restart resolves a stored follow policy against fresh IDs and never recolors absent groups', () => {
+  const freshGroups = [group(99)]
+  const bindings = resolveWorkspaceTabGroupLinks(freshGroups, [violetWorkspace], followingLinks, {})
+  assert.deepEqual(getWorkspaceGroupColorUpdates([violetWorkspace], followingLinks, freshGroups, bindings), [
+    { groupId: 99, linkId: 'link-uuid', color: 'purple' },
+  ])
+  assert.deepEqual(getWorkspaceGroupColorUpdates([violetWorkspace], followingLinks, [], bindings), [])
+})
+
+test('color API writes only color and skips an already matching group', async () => {
+  mockChrome([], [])
+  const changes = []
+  globalThis.chrome.tabGroups.get = async (id) => ({ id, color: id === 10 ? 'blue' : 'purple' })
+  globalThis.chrome.tabGroups.update = async (id, data) => { changes.push({ id, data }) }
+  await updateChromeTabGroupColor(10, 'purple')
+  await updateChromeTabGroupColor(20, 'purple')
+  assert.deepEqual(changes, [{ id: 10, data: { color: 'purple' } }])
+})
+
+test('missing group rejects color update without changing saved Workspace data', async () => {
+  mockChrome([], [])
+  let updates = 0
+  globalThis.chrome.tabGroups.get = async () => { throw new Error('No group with id') }
+  globalThis.chrome.tabGroups.update = async () => { updates++ }
+  await assert.rejects(updateChromeTabGroupColor(10, 'purple'), /No group/)
+  assert.equal(updates, 0)
+  assert.equal(followingLinks[0].workspaceId, violetWorkspace.id)
+})
+
+test('stored color policies round-trip; legacy policies remain absent and invalid policies are rejected', async () => {
+  let document, writes = 0
+  globalThis.chrome = { storage: { local: {
+    get: async () => ({ 'skope.workspaceState.v1': document }),
+    set: async (data) => { document = structuredClone(data['skope.workspaceState.v1']); writes++ },
+  } } }
+  for (const colorMode of [undefined, 'chrome', 'workspace']) {
+    const record = { ...links[0], ...(colorMode ? { colorMode } : {}) }
+    await saveWorkspaceState([violetWorkspace], [record])
+    const restored = await loadWorkspaceState()
+    assert.deepEqual(restored.workspaces, [violetWorkspace])
+    assert.deepEqual(restored.tabGroupLinks, [record])
+  }
+  await assert.rejects(saveWorkspaceState([violetWorkspace], [{ ...links[0], colorMode: 'invalid' }]), /invalid/)
+  assert.equal(writes, 3)
 })

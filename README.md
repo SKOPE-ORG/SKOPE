@@ -58,3 +58,5 @@ The official blue Glossy Orbital artwork is stored in `public/icons/`. The 16, 3
 The side panel supports Workspace management and classification of live Chrome tab groups. Saved Workspace links do not create active groups: active cards require a current Chrome group with actual member tabs. Removing only some tabs keeps the remaining group; ungrouping every tab removes the active card and preserves saved Workspace links. Saving/restoring full tab-group snapshots remains a separate feature.
 
 See [tab-group synchronization verification](docs/tab-group-sync-verification.md) for regression coverage and Chrome restart/manual checks.
+
+New groups default to following the Workspace color. Existing imports and legacy saved links keep Chrome colors until explicitly set to Follow Workspace. See [color policies and Chrome verification](docs/workspace-group-color-verification.md).
