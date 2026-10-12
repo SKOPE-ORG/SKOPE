@@ -33,6 +33,7 @@ To reload after rebuilding, click the reload icon for SKOPE on `chrome://extensi
 ## Checks
 
 ```sh
+npm test
 npm run lint
 npm run build
 ```
@@ -41,6 +42,8 @@ npm run build
 
 - `sidePanel`: open SKOPE in Chrome's side panel when its toolbar action is clicked.
 - `storage`: save workspace names, icons, colors, order, and collapsed state in `chrome.storage.local`.
+- `tabGroups`: query live group metadata and update a newly created group's name/color.
+- `tabs`: read tab titles/URLs/favicons, activate tabs, and group selected ungrouped tabs.
 
 Workspace deletion only removes the workspace record from SKOPE; it does not close Chrome tabs or delete Chrome tab groups. SKOPE stores workspace data on this device and does not send it to an external server.
 
@@ -52,4 +55,6 @@ The official blue Glossy Orbital artwork is stored in `public/icons/`. The 16, 3
 
 ## Current scope
 
-The side panel supports workspace creation, editing (name, icon, and color), ordering, collapse/expand, and deletion. Workspace data persists locally in Chrome Storage. Connecting workspaces to live Chrome tab groups and saving/restoring tab groups remain tracked separately in the [v0.1 MVP milestone](https://github.com/SKOPE-ORG/SKOPE/milestone/1).
+The side panel supports Workspace management and classification of live Chrome tab groups. Saved Workspace links do not create active groups: active cards require a current Chrome group with actual member tabs. Removing only some tabs keeps the remaining group; ungrouping every tab removes the active card and preserves saved Workspace links. Saving/restoring full tab-group snapshots remains a separate feature.
+
+See [tab-group synchronization verification](docs/tab-group-sync-verification.md) for regression coverage and Chrome restart/manual checks.
