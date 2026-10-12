@@ -620,6 +620,10 @@ button:disabled {
   gap: 8px;
 }
 
+.icon-choices {
+  flex-wrap: wrap;
+}
+
 .choice-icon {
   display: grid;
   width: 35px;
