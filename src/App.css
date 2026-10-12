@@ -32,16 +32,11 @@
 }
 
 .brand-mark {
-  display: grid;
-  width: 29px;
-  height: 29px;
-  place-items: center;
-  border-radius: 9px;
-  color: #fff;
-  background: #303039;
-  font-size: 14px;
-  font-weight: 750;
-  box-shadow: 0 2px 4px rgb(31 30 36 / 14%);
+  display: block;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  object-fit: contain;
 }
 
 .brand-name {

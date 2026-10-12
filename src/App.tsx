@@ -184,8 +184,8 @@ function App() {
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <span className="brand-mark" aria-hidden="true">S</span>
-          <span className="brand-name">SKOPE</span>
+          <img className="brand-mark" src="/icons/skope-logo.png" alt="SKOPE" width={32} height={32} />
+          <span className="brand-name" aria-hidden="true">SKOPE</span>
         </div>
         <div className="storage-pill" title={storageReady ? 'Saved in Chrome on this device' : 'Chrome storage is not ready'}>
           <span className={`status-dot ${storageReady ? 'is-connected' : ''}`} aria-hidden="true" />
