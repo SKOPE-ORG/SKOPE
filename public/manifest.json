@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "SKOPE — Workspace Manager",
+  "version": "0.1.0",
+  "description": "Organize Chrome tab groups into saved workspaces.",
+  "permissions": ["sidePanel"],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open SKOPE"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  }
+}
