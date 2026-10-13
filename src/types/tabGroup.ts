@@ -22,8 +22,7 @@ export interface ChromeTabItem {
 }
 
 export interface ChromeTabGroupSnapshot {
-  /** Live API query result only; saved references must never create an active group. */
-  /** Chrome group ID; kept in memory only because it is session-scoped. */
+  /** Session-only Chrome ID from a live query; saved links cannot create active groups. */
   id: number
   windowId: number
   title: string

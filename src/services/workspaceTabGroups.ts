@@ -7,7 +7,7 @@ export function resolveWorkspaceTabGroupLinks(
   links: WorkspaceTabGroupLink[],
   runtimeBindings: Record<string, string>,
 ): Record<string, string> {
-  const workspaceIds = new Set(workspaces.map((workspace) => workspace.id))
+  const workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]))
   const linkById = new Map(links.map((link) => [link.id, link]))
   const liveGroupIds = new Set(groups.map((group) => String(group.id)))
   const result: Record<string, string> = {}
@@ -19,8 +19,7 @@ export function resolveWorkspaceTabGroupLinks(
       liveGroupIds.has(groupId) &&
       link &&
       !usedLinkIds.has(linkId) &&
-      workspaceIds.has(link.workspaceId) &&
-      workspaces.find((workspace) => workspace.id === link.workspaceId)?.tabGroupIds.includes(link.id)
+      workspaceById.get(link.workspaceId)?.tabGroupIds.includes(link.id)
     ) {
       result[groupId] = linkId
       usedLinkIds.add(linkId)
@@ -30,8 +29,7 @@ export function resolveWorkspaceTabGroupLinks(
   const unresolvedGroups = groups.filter((group) => !result[String(group.id)])
   const availableLinks = links.filter(
     (link) =>
-      workspaceIds.has(link.workspaceId) &&
-      workspaces.find((workspace) => workspace.id === link.workspaceId)?.tabGroupIds.includes(link.id) &&
+      workspaceById.get(link.workspaceId)?.tabGroupIds.includes(link.id) &&
       !usedLinkIds.has(link.id),
   )
   const groupsByFingerprint = new Map<string, ChromeTabGroupSnapshot[]>()
