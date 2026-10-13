@@ -7,8 +7,12 @@ import { join } from 'node:path'
 
 // Explicit allowlist excludes development assets, future desktop icons and user files.
 const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'))
-const githubCandidate = process.argv.includes('--github-candidate')
-assert(process.argv.slice(2).every((argument) => argument === '--github-candidate'))
+const githubBeta = process.argv.includes('--github-beta')
+assert(process.argv.slice(2).every((argument) => argument === '--github-beta'))
+if (githubBeta) {
+  assert.equal(manifest.version, '0.1.0')
+  assert.equal(manifest.version_name, '0.1.0 Beta')
+}
 assert.equal(manifest.manifest_version, 3)
 assert.deepEqual([...manifest.permissions].sort(), ['sidePanel', 'storage', 'tabGroups', 'tabs'].sort())
 assert.equal(manifest.host_permissions, undefined)
@@ -39,7 +43,7 @@ for (const file of files) {
   await copyFile(join('dist', file), join(staging, file))
 }
 await mkdir('release-artifacts', { recursive: true })
-const artifact = githubCandidate ? 'SKOPE-Extension-v1.0.0.zip' : `skope-${manifest.version}-rc-${Date.now()}.zip`
+const artifact = githubBeta ? 'SKOPE-Extension-v0.1.0-beta.zip' : `skope-${manifest.version}-rc-${Date.now()}.zip`
 const target = join(process.cwd(), 'release-artifacts', artifact)
 // Build a fresh archive so an older ZIP cannot retain stale entries.
 const temporaryZip = join(staging, 'package.zip')
@@ -51,7 +55,7 @@ assert.equal(JSON.parse(execFileSync('unzip', ['-p', target, 'manifest.json'], {
 const digest = createHash('sha256').update(await readFile(target)).digest('hex')
 await writeFile(`${target}.sha256`, `${digest}  ${artifact}\n`)
 await writeFile(`${target}.metadata.json`, JSON.stringify({
-  candidateOnly: true, targetVersion: githubCandidate ? '1.0.0' : manifest.version,
+  candidateOnly: true, targetVersion: githubBeta ? '0.1.0-beta' : manifest.version,
   manifestVersion: manifest.version, sha256: digest,
   sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   files: entries, chromeManualQA: 'pending',
