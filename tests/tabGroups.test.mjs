@@ -14,6 +14,7 @@ const modules = [
   'types/tabGroup', 'types/workspace',
   'services/workspaceGroupColors',
   'services/workspaceGroupSession', 'services/workspaceDeletion',
+  'background/index',
 ]
 for (const module of modules) {
   const source = await readFile(new URL(`../src/${module}.ts`, import.meta.url), 'utf8')
@@ -33,6 +34,33 @@ const { workspaceColorToChromeColor, getWorkspaceGroupColorUpdates } = await imp
 const { deleteWorkspaceAndUngroup } = await import(pathToFileURL(join(directory, 'services/workspaceDeletion.js')))
 const { loadWorkspaceGroupBindings, rememberWorkspaceGroupBindings } = await import(pathToFileURL(join(directory, 'services/workspaceGroupSession.js')))
 after(async () => { delete globalThis.chrome; await rm(directory, { recursive: true }) })
+
+test('extension update configures Side Panel without clearing or rewriting existing Workspace storage', async () => {
+  const saved = { schemaVersion: 1, workspaces: [{
+    id: crypto.randomUUID(), name: 'Upgrade fixture', icon: '◈', color: '#4385E5',
+    order: 0, collapsed: true, createdAt: 1, updatedAt: 2, tabGroupIds: [],
+  }], tabGroupLinks: [] }
+  let installed, startup, configurations = 0
+  globalThis.chrome = {
+    runtime: { onInstalled: { addListener: (listener) => { installed = listener } },
+      onStartup: { addListener: (listener) => { startup = listener } } },
+    sidePanel: { setPanelBehavior: async (settings) => {
+      assert.deepEqual(settings, { openPanelOnActionClick: true }); configurations++
+    } },
+    storage: { local: {
+      get: async () => ({ 'skope.workspaceState.v1': structuredClone(saved) }),
+      set: async () => { assert.fail('update must not rewrite storage') },
+      clear: async () => { assert.fail('update must not clear storage') },
+      remove: async () => { assert.fail('update must not remove storage') },
+    } },
+  }
+  await import(pathToFileURL(join(directory, 'background/index.js')))
+  installed({ reason: 'update', previousVersion: '0.1.0' })
+  startup()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(configurations, 2)
+  assert.deepEqual(await loadWorkspaceState(), { workspaces: saved.workspaces, tabGroupLinks: [] })
+})
 
 test('Workspace CRUD, ordering, icons, colors and collapsed state persist across fresh loads', async () => {
   let document
