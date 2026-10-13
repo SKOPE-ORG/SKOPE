@@ -1,12 +1,12 @@
 # SKOPE Extension
 
-SKOPE는 Chrome 탭과 탭 그룹을 Workspace별로 관리하는 생산성 확장 프로그램입니다. 공식 오비탈 로고와 미니멀한 사이드 패널에서 작업 환경을 정리합니다. 이번 배포는 Chrome Extension만 포함하며 독립형 SKOPE Browser는 포함하지 않습니다.
+SKOPE는 Chrome 탭과 탭 그룹을 Workspace별로 관리하는 생산성 확장 프로그램입니다. 이번 배포는 Chrome Extension만 포함하며 독립형 SKOPE Browser는 포함하지 않습니다.
 
-**버전: v0.1.0-beta — 공개 승인 전 베타 준비 단계입니다.** GitHub 태그는 `v0.1.0-beta`, Chrome 내부 버전은 `0.1.0`, 표시 버전은 `0.1.0 Beta`입니다. [Chrome 버전 형식](https://developer.chrome.com/docs/extensions/reference/manifest/version)에 맞춘 설정입니다.
+**공개 베타: [v0.1.0-beta](https://github.com/SKOPE-ORG/SKOPE/releases/tag/v0.1.0-beta).** 이 브랜치의 리팩터링은 다음 버전 준비 작업이며 공개 베타 ZIP에는 포함되지 않습니다. GitHub 태그는 `v0.1.0-beta`, Chrome 내부 버전은 `0.1.0`, 표시 버전은 `0.1.0 Beta`입니다. [Chrome 버전 형식](https://developer.chrome.com/docs/extensions/reference/manifest/version)에 맞춘 설정입니다.
 
 ## 주요 기능
 
-다음은 구현된 기능입니다. 자동 테스트는 모의 Chrome API 기반이며 모든 기능의 실제 Chrome 검증을 완료했다는 뜻은 아닙니다.
+구현된 기능을 아래에 정리했습니다. 모의 Chrome API 검사와 실제 Chrome 검증 상태는 구분합니다.
 
 - Workspace 생성·편집·삭제, 아이콘·색상 설정, 순서 이동 및 접기·펼치기
 - 현재 창의 Chrome 탭 그룹을 Workspace에 연결·재배정하고 내부 탭 목록 표시
@@ -20,7 +20,7 @@ SKOPE는 Chrome 탭과 탭 그룹을 Workspace별로 관리하는 생산성 확�
 
 Node.js나 개발 서버가 필요하지 않습니다. Google Chrome의 개발자 모드를 사용합니다.
 
-1. [GitHub Releases](https://github.com/SKOPE-ORG/SKOPE/releases)에서 최신 ZIP `SKOPE-Extension-v0.1.0-beta.zip`을 다운로드합니다. 게시된 릴리스가 없다면 아직 공개 전입니다.
+1. [GitHub Releases](https://github.com/SKOPE-ORG/SKOPE/releases)에서 최신 ZIP `SKOPE-Extension-v0.1.0-beta.zip`을 다운로드합니다.
 2. ZIP을 압축 해제하고 폴더를 계속 보관할 위치(예: 문서 폴더의 `SKOPE-Extension`)로 옮깁니다.
 3. Chrome 주소창에 `chrome://extensions`를 입력합니다.
 4. 오른쪽 위 **개발자 모드**를 켭니다.
@@ -77,9 +77,12 @@ npm run dev
 npm test
 npm run lint
 npm run build
-npm run release:github
 ```
 
-`npm run dev`는 UI 미리보기이며 localhost에서 Chrome 확장 API를 사용할 수 없습니다. 개발자는 `dist`를 Chrome에 로드하세요. `release:github`은 `release-artifacts/SKOPE-Extension-v0.1.0-beta.zip`과 SHA-256·metadata를 생성하며 게시하지 않습니다. [릴리스 노트](docs/release/beta-release-notes.md)를 참고하세요.
+`npm run dev`는 UI 미리보기이며 localhost에서 Chrome 확장 API를 사용할 수 없습니다. 개발자는 `dist`를 Chrome에 로드하세요. 다음 버전 개발 중에는 공개 베타 ZIP을 덮어쓰지 마세요. 버전을 확정한 뒤 패키징 스크립트의 버전과 파일명을 맞춰 생성합니다. [릴리스 노트](docs/release/beta-release-notes.md)를 참고하세요.
 
 공식 로고는 `public/icons/`, 향후 macOS 보관 자산은 `desktop/`에 있습니다. 보관용 고해상도 이미지와 독립형 Browser 자산은 배포 ZIP에 포함하지 않습니다. 이전 1.0.0 준비 문서는 과거 후보 기록이며 이번 베타 배포 지침은 이 README와 베타 문서를 따릅니다.
+
+## 기여와 라이선스
+
+작은 버그 수정과 문서 개선을 환영합니다. [기여 안내](CONTRIBUTING.md)에 개발 흐름과 데이터 보존 원칙을 정리했습니다. 이 프로젝트는 [MIT License](LICENSE)를 따릅니다.

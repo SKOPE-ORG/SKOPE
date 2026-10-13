@@ -25,3 +25,5 @@ export interface Workspace {
   /** Stable SKOPE tab-group link IDs; never Chrome's session group IDs. */
   tabGroupIds: string[]
 }
+
+export type WorkspaceFields = Pick<Workspace, 'name' | 'icon' | 'color'>
