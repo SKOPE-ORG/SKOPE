@@ -25,7 +25,7 @@ for (const module of modules) {
   await writeFile(target, output)
 }
 await writeFile(join(directory, 'package.json'), '{"type":"module"}')
-const { queryChromeTabGroups, subscribeToChromeTabGroupChanges, createChromeTabGroup, updateChromeTabGroupColor } = await import(pathToFileURL(join(directory, 'services/chromeTabGroups.js')))
+const { queryChromeTabGroups, subscribeToChromeTabGroupChanges, createChromeTabGroup, updateChromeTabGroupColor, ungroupChromeTabGroup } = await import(pathToFileURL(join(directory, 'services/chromeTabGroups.js')))
 const { ChromeTabGroupSync } = await import(pathToFileURL(join(directory, 'services/chromeTabGroupSync.js')))
 const { resolveWorkspaceTabGroupLinks } = await import(pathToFileURL(join(directory, 'services/workspaceTabGroups.js')))
 const { loadWorkspaceState, saveWorkspaceState } = await import(pathToFileURL(join(directory, 'services/workspaceStorage.js')))
@@ -476,4 +476,73 @@ test('a group reassigned before the operation is not ungrouped from its new Work
   assert.ok(f.groups.some((item) => item.id === 10))
   assert.ok(!f.ungroupCalls.flat().includes(1))
   assert.ok(f.saved.workspaces[1].tabGroupIds.includes('link-10'))
+})
+
+test('direct Ungroup preserves all tabs, other groups and saved Workspace records', async () => {
+  const f = await deletionFixture()
+  await ungroupChromeTabGroup(10)
+  assert.deepEqual(f.ungroupCalls, [[1, 2]])
+  assert.equal(f.tabs.length, 5)
+  assert.deepEqual(f.tabs.map((item) => item.groupId), [-1, -1, 20, 30, -1])
+  assert.deepEqual(f.groups.map((item) => item.id), [20, 30])
+  assert.deepEqual(f.saved, f.before)
+  assert.equal(f.localWrites, 0)
+})
+
+test('already removed group is a safe no-op without touching any tab or saved record', async () => {
+  const f = await deletionFixture()
+  await ungroupChromeTabGroup(999)
+  assert.deepEqual(f.ungroupCalls, [])
+  assert.equal(f.tabs.length, 5)
+  assert.deepEqual(f.saved, f.before)
+})
+
+test('a tab moved to another group before Ungroup is excluded by the fresh member query', async () => {
+  const f = await deletionFixture()
+  f.tabs.find((item) => item.id === 2).groupId = 30
+  await ungroupChromeTabGroup(10)
+  assert.deepEqual(f.ungroupCalls, [[1]])
+  assert.equal(f.tabs.find((item) => item.id === 2).groupId, 30)
+  assert.equal(f.tabs.length, 5)
+  assert.deepEqual(f.saved, f.before)
+})
+
+test('direct Ungroup API failure leaves group and saved data intact', async () => {
+  const f = await deletionFixture()
+  f.failures.add(10)
+  await assert.rejects(ungroupChromeTabGroup(10), /Ungroup failed/)
+  assert.ok(f.groups.some((item) => item.id === 10))
+  assert.equal(f.tabs[0].groupId, 10)
+  assert.deepEqual(f.saved, f.before)
+})
+
+test('inconsistent member query is rejected before applying changes to another group', async () => {
+  const f = await deletionFixture()
+  const query = globalThis.chrome.tabs.query
+  globalThis.chrome.tabs.query = async (info) => info.groupId === 10
+    ? [tab(1), { ...tab(2), groupId: 30 }] : query(info)
+  await assert.rejects(ungroupChromeTabGroup(10), /membership changed/)
+  assert.deepEqual(f.ungroupCalls, [])
+  assert.deepEqual(f.saved, f.before)
+})
+
+test('Ungroup is not treated as success until the group actually disappears from Chrome', async () => {
+  const f = await deletionFixture()
+  f.keepGroup = true
+  await assert.rejects(ungroupChromeTabGroup(10), /Chrome still reports/)
+  assert.deepEqual(f.groups.map((item) => item.id), [10, 20, 30])
+  assert.deepEqual(f.saved, f.before)
+})
+
+test('verified action immediately removes only its cached group even without onRemoved and rejects stale results', async (t) => {
+  const pending = deferred()
+  let queries = 0
+  const h = harness(t, () => ++queries === 1 ? Promise.resolve(snapshot([group(), group(88)])) : pending.promise)
+  await settle()
+  const oldRequest = h.sync.refresh()
+  h.sync.confirmGroupRemoved(10)
+  assert.deepEqual(h.latest.groups.map((item) => item.id), [88])
+  pending.resolve(snapshot([group(), group(88)]))
+  assert.equal(await oldRequest, null)
+  assert.deepEqual(h.latest.groups.map((item) => item.id), [88])
 })

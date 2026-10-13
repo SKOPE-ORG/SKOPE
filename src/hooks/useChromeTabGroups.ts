@@ -19,6 +19,7 @@ export function useChromeTabGroups(
     onGroupsChanged?.(groups, previous))
 
   const refresh = useCallback(() => syncRef.current?.refresh() ?? Promise.resolve(null), [])
+  const confirmGroupRemoved = useCallback((groupId: number) => syncRef.current?.confirmGroupRemoved(groupId), [])
 
   useEffect(() => {
     if (!enabled) return
@@ -42,5 +43,5 @@ export function useChromeTabGroups(
     }
   }, [enabled])
 
-  return { ...state, loading, error, refresh }
+  return { ...state, loading, error, refresh, confirmGroupRemoved }
 }

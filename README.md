@@ -62,3 +62,5 @@ See [tab-group synchronization verification](docs/tab-group-sync-verification.md
 New groups default to following the Workspace color. Existing imports and legacy saved links keep Chrome colors until explicitly set to Follow Workspace. See [color policies and Chrome verification](docs/workspace-group-color-verification.md).
 
 Session-only group IDs are cached in `chrome.storage.session` for cross-window identity while the extension is loaded. They are not permanent Workspace keys. See [Workspace deletion verification](docs/workspace-deletion-verification.md).
+
+Use a group's ··· menu to Ungroup it directly without closing website tabs. This works in Unassigned Groups and inside a Workspace; saved Workspace records remain. See [direct Ungroup verification](docs/group-ungroup-menu-verification.md).
