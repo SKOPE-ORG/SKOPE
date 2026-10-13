@@ -42,9 +42,7 @@ async function fingerprintTabs(tabs: ChromeTabItem[]): Promise<string> {
 
 export async function queryChromeTabGroups(): Promise<ChromeTabGroupState> {
   const api = getChromeApi()
-  const [activeTabs] = await Promise.all([
-    api.tabs.query({ active: true, lastFocusedWindow: true }),
-  ])
+  const activeTabs = await api.tabs.query({ active: true, currentWindow: true })
   const windowId = activeTabs[0]?.windowId
   if (windowId === undefined) {
     return { groups: [], ungroupedTabs: [], windowId: null }
@@ -136,6 +134,9 @@ export function subscribeToChromeTabGroupChanges(
 ): () => void {
   const api = getChromeApi()
   const handleChange = () => onChange()
+  const handleTabUpdated = (_tabId: number, changes: chrome.tabs.OnUpdatedInfo) => {
+    if (['groupId', 'title', 'url', 'favIconUrl', 'status'].some((key) => key in changes)) onChange()
+  }
   const handleGroupRemoved = (group: chrome.tabGroups.TabGroup) => {
     onGroupRemoved?.(group.id)
     onChange()
@@ -147,7 +148,6 @@ export function subscribeToChromeTabGroupChanges(
   ]
   const tabEvents = [
     api.tabs.onCreated,
-    api.tabs.onUpdated,
     api.tabs.onRemoved,
     api.tabs.onMoved,
     api.tabs.onAttached,
@@ -158,11 +158,13 @@ export function subscribeToChromeTabGroupChanges(
 
   tabGroupEvents.forEach((event) => event.addListener(handleChange))
   api.tabGroups.onRemoved.addListener(handleGroupRemoved)
+  api.tabs.onUpdated.addListener(handleTabUpdated)
   tabEvents.forEach((event) => event.addListener(handleChange))
 
   return () => {
     tabGroupEvents.forEach((event) => event.removeListener(handleChange))
     api.tabGroups.onRemoved.removeListener(handleGroupRemoved)
+    api.tabs.onUpdated.removeListener(handleTabUpdated)
     tabEvents.forEach((event) => event.removeListener(handleChange))
   }
 }

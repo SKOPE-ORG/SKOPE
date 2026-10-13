@@ -56,6 +56,8 @@ function App() {
   const isExtension =
     typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id && chrome.storage?.local)
   const [groupBindings, setGroupBindings] = useState<Record<string, string>>({})
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [tabGroupLinks, setTabGroupLinks] = useState<WorkspaceTabGroupLink[]>([])
   const handleChromeGroupRemoved = useCallback((groupId: number) => {
     setGroupBindings((current) => Object.fromEntries(
       Object.entries(current).filter(([id]) => id !== String(groupId)),
@@ -68,9 +70,19 @@ function App() {
     loading: groupsLoading,
     error: groupsError,
     refresh: refreshGroups,
-  } = useChromeTabGroups(isExtension, handleChromeGroupRemoved)
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
-  const [tabGroupLinks, setTabGroupLinks] = useState<WorkspaceTabGroupLink[]>([])
+  } = useChromeTabGroups(isExtension, handleChromeGroupRemoved, (groups, previousGroups) => {
+    setGroupBindings((current) => {
+      // Keep the previous live mapping when a restored group loses only some tabs.
+      // Prune runtime IDs against each fresh query; retain saved Workspace links.
+      const next = resolveWorkspaceTabGroupLinks(
+        groups, workspaces, tabGroupLinks,
+        resolveWorkspaceTabGroupLinks(previousGroups, workspaces, tabGroupLinks, current),
+      )
+      return Object.keys(next).length === Object.keys(current).length &&
+        Object.entries(next).every(([id, linkId]) => current[id] === linkId)
+        ? current : next
+    })
+  })
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [loading, setLoading] = useState(isExtension)
