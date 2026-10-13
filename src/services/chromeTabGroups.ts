@@ -40,17 +40,16 @@ async function fingerprintTabs(tabs: ChromeTabItem[]): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export async function queryChromeTabGroups(): Promise<ChromeTabGroupState> {
+export async function queryChromeTabGroups(scope: 'current' | 'all' = 'current'): Promise<ChromeTabGroupState> {
   const api = getChromeApi()
-  const activeTabs = await api.tabs.query({ active: true, currentWindow: true })
-  const windowId = activeTabs[0]?.windowId
-  if (windowId === undefined) {
+  const windowId = scope === 'all' ? null : (await api.tabs.query({ active: true, currentWindow: true }))[0]?.windowId
+  if (scope === 'current' && windowId === undefined) {
     return { groups: [], ungroupedTabs: [], windowId: null }
   }
 
   const [chromeGroups, windowTabs] = await Promise.all([
-    api.tabGroups.query({ windowId }),
-    api.tabs.query({ windowId }),
+    api.tabGroups.query(windowId == null ? {} : { windowId }),
+    api.tabs.query(windowId == null ? {} : { windowId }),
   ])
 
   const tabsByGroup = new Map<number, ChromeTabItem[]>()
@@ -87,7 +86,7 @@ export async function queryChromeTabGroups(): Promise<ChromeTabGroupState> {
   return {
     groups: groups.filter((group): group is ChromeTabGroupSnapshot => group !== null),
     ungroupedTabs,
-    windowId,
+    windowId: windowId ?? null,
   }
 }
 
@@ -101,6 +100,24 @@ export async function updateChromeTabGroupColor(groupId: number, color: ChromeTa
   const api = getChromeApi()
   const group = await api.tabGroups.get(groupId)
   if (group.color !== color) await api.tabGroups.update(groupId, { color })
+}
+
+/** Ungroup only current members of this exact session group. Never close tabs. */
+export async function ungroupChromeTabGroup(groupId: number): Promise<void> {
+  const api = getChromeApi()
+  if (!(await api.tabGroups.query({})).some((group) => group.id === groupId)) return
+  const members = await api.tabs.query({ groupId })
+  if (members.some((tab) => tab.id === undefined || tab.groupId !== groupId)) {
+    throw new Error('Chrome group membership changed. Retry deletion.')
+  }
+  const ids = members.map((tab) => tab.id!)
+  if (ids.length > 0) await api.tabs.ungroup([ids[0], ...ids.slice(1)])
+  const [remaining, groups] = await Promise.all([
+    api.tabs.query({ groupId }), api.tabGroups.query({}),
+  ])
+  if (remaining.length > 0 || groups.some((group) => group.id === groupId)) {
+    throw new Error('Chrome still reports this group. Your Workspace has been kept; retry deletion.')
+  }
 }
 
 export async function createChromeTabGroup(

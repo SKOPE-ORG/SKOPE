@@ -12,6 +12,8 @@ import {
 } from './services/chromeTabGroups'
 import { getWorkspaceGroupColorUpdates, workspaceColorToChromeColor } from './services/workspaceGroupColors'
 import { resolveWorkspaceTabGroupLinks } from './services/workspaceTabGroups'
+import { loadWorkspaceGroupBindings, rememberWorkspaceGroupBindings } from './services/workspaceGroupSession'
+import { deleteWorkspaceAndUngroup } from './services/workspaceDeletion'
 import { useChromeTabGroups } from './hooks/useChromeTabGroups'
 import {
   WORKSPACE_COLORS,
@@ -61,6 +63,7 @@ function App() {
   const [groupBindings, setGroupBindings] = useState<Record<string, string>>({})
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [tabGroupLinks, setTabGroupLinks] = useState<WorkspaceTabGroupLink[]>([])
+  const [tabActionError, setTabActionError] = useState<string | null>(null)
   const handleChromeGroupRemoved = useCallback((groupId: number) => {
     setGroupBindings((current) => Object.fromEntries(
       Object.entries(current).filter(([id]) => id !== String(groupId)),
@@ -74,16 +77,16 @@ function App() {
     error: groupsError,
     refresh: refreshGroups,
   } = useChromeTabGroups(isExtension, handleChromeGroupRemoved, (groups, previousGroups) => {
-    setGroupBindings((current) => {
-      // Keep the previous live mapping when a restored group loses only some tabs.
-      // Prune runtime IDs against each fresh query; retain saved Workspace links.
-      const next = resolveWorkspaceTabGroupLinks(
-        groups, workspaces, tabGroupLinks,
-        resolveWorkspaceTabGroupLinks(previousGroups, workspaces, tabGroupLinks, current),
-      )
-      return Object.keys(next).length === Object.keys(current).length &&
+    // Preserve session mappings for other windows; prune only the visible cache.
+    const next = resolveWorkspaceTabGroupLinks(
+      groups, workspaces, tabGroupLinks,
+      resolveWorkspaceTabGroupLinks(previousGroups, workspaces, tabGroupLinks, groupBindings),
+    )
+    setGroupBindings((current) => Object.keys(next).length === Object.keys(current).length &&
         Object.entries(next).every(([id, linkId]) => current[id] === linkId)
-        ? current : next
+        ? current : next)
+    void rememberWorkspaceGroupBindings(next).catch(() => {
+      setTabActionError('Could not cache Chrome session connections. Reload SKOPE before deleting a Workspace.')
     })
   })
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
@@ -92,7 +95,6 @@ function App() {
   const [storageReady, setStorageReady] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [tabActionError, setTabActionError] = useState<string | null>(null)
   const [colorSyncError, setColorSyncError] = useState<string | null>(null)
   const [colorSyncAttempt, setColorSyncAttempt] = useState(0)
   const colorSyncKey = useRef('')
@@ -109,9 +111,10 @@ function App() {
     setLoading(true)
     setError(null)
     try {
-      const loaded = await loadWorkspaceState()
+      const [loaded, bindings] = await Promise.all([loadWorkspaceState(), loadWorkspaceGroupBindings()])
       setWorkspaces(loaded.workspaces)
       setTabGroupLinks(loaded.tabGroupLinks)
+      setGroupBindings(bindings)
       setActiveWorkspaceId(loaded.workspaces[0]?.id ?? null)
       setStorageReady(true)
     } catch (loadError) {
@@ -126,11 +129,12 @@ function App() {
     if (!isExtension) return
 
     let cancelled = false
-    void loadWorkspaceState()
-      .then((loaded) => {
+    void Promise.all([loadWorkspaceState(), loadWorkspaceGroupBindings()])
+      .then(([loaded, bindings]) => {
         if (cancelled) return
         setWorkspaces(loaded.workspaces)
         setTabGroupLinks(loaded.tabGroupLinks)
+        setGroupBindings(bindings)
         setActiveWorkspaceId(loaded.workspaces[0]?.id ?? null)
         setStorageReady(true)
       })
@@ -208,20 +212,31 @@ function App() {
 
   const handleDeleteWorkspace = async () => {
     if (!dialog || dialog.kind !== 'delete') return
-    const now = Date.now()
-    const nextLinks = tabGroupLinks.filter((link) => link.workspaceId !== dialog.workspace.id)
-    const next = workspaces
-      .filter((workspace) => workspace.id !== dialog.workspace.id)
-      .map((workspace, order) => ({ ...workspace, order, updatedAt: now }))
-
-    if (await persistWorkspaceData(next, nextLinks)) {
-      const removedIds = new Set(tabGroupLinks
-        .filter((link) => link.workspaceId === dialog.workspace.id)
-        .map((link) => link.id))
+    setSaving(true)
+    setError(null)
+    try {
+      const next = await deleteWorkspaceAndUngroup(dialog.workspace.id, groupBindings)
+      setWorkspaces(next.workspaces)
+      setTabGroupLinks(next.tabGroupLinks)
+      const remainingIds = new Set(next.tabGroupLinks.map((link) => link.id))
       setGroupBindings((current) => Object.fromEntries(
-        Object.entries(current).filter(([, linkId]) => !removedIds.has(linkId)),
+        Object.entries(current).filter(([, linkId]) => remainingIds.has(linkId)),
       ))
+      setActiveWorkspaceId((current) => next.workspaces.some((item) => item.id === current)
+        ? current : next.workspaces[0]?.id ?? null)
       setDialog(null)
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError))
+      try {
+        const latest = await loadWorkspaceState()
+        setWorkspaces(latest.workspaces)
+        setTabGroupLinks(latest.tabGroupLinks)
+      } catch (reloadError) {
+        setError(`${getErrorMessage(deleteError)} ${getErrorMessage(reloadError)}`)
+      }
+    } finally {
+      await refreshGroups()
+      setSaving(false)
     }
   }
 
@@ -359,6 +374,7 @@ function App() {
       }
       throw new Error('Could not save the Workspace and tab group connection.')
     }
+    await rememberWorkspaceGroupBindings({ [groupKey]: link.id })
   }
 
   const removeTabGroupFromWorkspace = async (group: ChromeTabGroupSnapshot, workspaceId: string) => {
@@ -1162,16 +1178,17 @@ function DeleteWorkspaceDialog({ workspace, saving, error, onCancel, onDelete }:
       ref={dialogRef}
       className="workspace-dialog delete-dialog"
       aria-labelledby="delete-dialog-title"
-      onCancel={(event) => { event.preventDefault(); onCancel() }}
+      onCancel={(event) => { event.preventDefault(); if (!saving) onCancel() }}
     >
       <div className="dialog-heading">
         <div>
           <p className="eyebrow">REMOVE WORKSPACE</p>
           <h2 id="delete-dialog-title">Delete “{workspace.name}”?</h2>
         </div>
-        <button type="button" className="dialog-close" onClick={onCancel} aria-label="Close dialog">×</button>
+        <button type="button" className="dialog-close" onClick={onCancel} aria-label="Close dialog" disabled={saving}>×</button>
       </div>
-      <p className="delete-copy">This removes the workspace from SKOPE. Your Chrome tabs and tab groups stay open.</p>
+      <p className="delete-copy">연결된 탭 그룹의 그룹화가 해제되며, 열린 탭은 유지됩니다.</p>
+      <p className="color-policy-help">Linked active groups in every Chrome window will be ungrouped. If a group cannot be ungrouped, this Workspace stays available for retry.</p>
       {error && <p className="dialog-error" role="alert">{error}</p>}
       <div className="dialog-actions">
         <button type="button" className="secondary-button" onClick={onCancel} disabled={saving}>Cancel</button>
