@@ -34,6 +34,35 @@ const { deleteWorkspaceAndUngroup } = await import(pathToFileURL(join(directory,
 const { loadWorkspaceGroupBindings, rememberWorkspaceGroupBindings } = await import(pathToFileURL(join(directory, 'services/workspaceGroupSession.js')))
 after(async () => { delete globalThis.chrome; await rm(directory, { recursive: true }) })
 
+test('Workspace CRUD, ordering, icons, colors and collapsed state persist across fresh loads', async () => {
+  let document
+  globalThis.chrome = { storage: { local: {
+    get: async () => ({ 'skope.workspaceState.v1': structuredClone(document) }),
+    set: async (data) => { document = structuredClone(data['skope.workspaceState.v1']) },
+  } } }
+  assert.deepEqual(await loadWorkspaceState(), { workspaces: [], tabGroupLinks: [] })
+  const { WORKSPACE_ICONS, WORKSPACE_COLORS } = await import(pathToFileURL(join(directory, 'types/workspace.js')))
+  const created = WORKSPACE_COLORS.map((color, index) => ({
+    id: crypto.randomUUID(), name: `Workspace ${index}`, icon: WORKSPACE_ICONS[index],
+    color: color.value, order: index, createdAt: 1, updatedAt: 1, collapsed: false, tabGroupIds: [],
+  }))
+  await saveWorkspaceState(created, [])
+  assert.deepEqual((await loadWorkspaceState()).workspaces, created)
+  const edited = created.map((item, index) => ({ ...item, name: `Edited ${index}`, collapsed: true, order: created.length - index, updatedAt: 2 }))
+  await saveWorkspaceState(edited, [])
+  assert.deepEqual((await loadWorkspaceState()).workspaces, [...edited].reverse())
+  const retained = edited.filter((item) => item.id !== edited[0].id)
+  await saveWorkspaceState(retained, [])
+  assert.deepEqual((await loadWorkspaceState()).workspaces, [...retained].reverse())
+  const before = structuredClone(document)
+  for (const changes of [{ name: '  ' }, { icon: 'invalid' }, { color: '#000000' }]) {
+    await assert.rejects(saveWorkspaceState([{ ...retained[0], ...changes }], []), /invalid/)
+    assert.deepEqual(document, before)
+  }
+  await assert.rejects(saveWorkspaceState([retained[0], retained[0]], []), /unique/)
+  assert.deepEqual(document, before)
+})
+
 const fingerprint = 'a'.repeat(64)
 const tab = (id, groupId = 10) => ({ id, groupId, windowId: 1, active: id === 1, title: `Tab ${id}`, url: `https://example.test/${id}` })
 const group = (id = 10, tabs = [tab(1), tab(2)], signature = fingerprint) => ({

@@ -1,5 +1,7 @@
 # SKOPE
 
+Release preparation: [RC checklist](docs/release/rc-checklist.md), [privacy policy draft](docs/release/privacy-policy-draft.md), [store listing draft](docs/release/store-listing-draft.md). Run `npm run release:package` to build and validate a minimal ZIP in `release-artifacts/`. This does not promote the version, upload, or publish.
+
 SKOPE is an open-source Chrome extension for organizing browser tabs into workspaces. This release lets you create and manage local workspaces from Chrome's side panel.
 
 ## Requirements
