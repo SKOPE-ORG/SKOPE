@@ -1,6 +1,6 @@
 # SKOPE
 
-SKOPE is an open-source Chrome extension foundation for organizing browser tabs into workspaces.
+SKOPE is an open-source Chrome extension for organizing browser tabs into workspaces. This release lets you create and manage local workspaces from Chrome's side panel.
 
 ## Requirements
 
@@ -40,9 +40,12 @@ npm run build
 ## Extension permissions
 
 - `sidePanel`: open SKOPE in Chrome's side panel when its toolbar action is clicked.
+- `storage`: save workspace names, icons, colors, order, and collapsed state in `chrome.storage.local`.
 
-The foundation requests only the permission it currently uses. Later tab, tab group, and local storage features will add their permissions in their respective changes. SKOPE does not send browsing data to an external server.
+Workspace deletion only removes the workspace record from SKOPE; it does not close Chrome tabs or delete Chrome tab groups. SKOPE stores workspace data on this device and does not send it to an external server.
+
+Workspace records have SKOPE-generated IDs and an ordered list of SKOPE tab-group reference IDs. Chrome's numeric tab-group IDs are session identifiers and are not used as permanent workspace references.
 
 ## Current scope
 
-This initial foundation release configures the Manifest V3 extension, service worker, Vite build, and side panel entry point. Workspace and tab management are tracked separately in the [v0.1 MVP milestone](https://github.com/SKOPE-ORG/SKOPE/milestone/1).
+The side panel supports workspace creation, editing (name, icon, and color), ordering, collapse/expand, and deletion. Workspace data persists locally in Chrome Storage. Connecting workspaces to live Chrome tab groups and saving/restoring tab groups remain tracked separately in the [v0.1 MVP milestone](https://github.com/SKOPE-ORG/SKOPE/milestone/1).
