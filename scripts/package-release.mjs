@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { readFile, mkdir, copyFile, mkdtemp, writeFile } from 'node:fs/promises'
+import { readFile, mkdir, copyFile, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 // Explicit allowlist excludes development assets, future desktop icons and user files.
 const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'))
+const githubCandidate = process.argv.includes('--github-candidate')
+assert(process.argv.slice(2).every((argument) => argument === '--github-candidate'))
 assert.equal(manifest.manifest_version, 3)
 assert.deepEqual([...manifest.permissions].sort(), ['sidePanel', 'storage', 'tabGroups', 'tabs'].sort())
 assert.equal(manifest.host_permissions, undefined)
@@ -20,6 +22,13 @@ const staging = await mkdtemp(join(tmpdir(), 'skope-release-'))
 for (const file of files) {
   assert(!file.includes('..') && !file.includes(':') && !file.startsWith('/'))
   const data = await readFile(join('dist', file))
+  if (/\.(js|css|html|json)$/.test(file)) {
+    const content = data.toString('utf8')
+    // Fail without echoing a possible secret. Heuristics supplement the file allowlist.
+    const suspicious = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|\/Users\/|Bearer\s+[A-Za-z0-9._-]{20,}/
+    assert(!suspicious.test(content), `Potential sensitive material in ${file}; inspect locally`)
+    assert(!/sourceMappingURL=/.test(content), `Unexpected source map in ${file}`)
+  }
   if (file.endsWith('.png') && file !== 'icons/skope-logo.png') {
     const size = Number(file.match(/icon-(\d+)\.png$/)?.[1])
     assert.equal(data.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
@@ -30,12 +39,22 @@ for (const file of files) {
   await copyFile(join('dist', file), join(staging, file))
 }
 await mkdir('release-artifacts', { recursive: true })
-const artifact = `skope-${manifest.version}-rc-${Date.now()}.zip`
+const artifact = githubCandidate ? 'SKOPE-Extension-v1.0.0.zip' : `skope-${manifest.version}-rc-${Date.now()}.zip`
 const target = join(process.cwd(), 'release-artifacts', artifact)
-execFileSync('zip', ['-X', '-q', target, ...[...files].sort()], { cwd: staging })
+// Build a fresh archive so an older ZIP cannot retain stale entries.
+const temporaryZip = join(staging, 'package.zip')
+execFileSync('zip', ['-X', '-q', temporaryZip, ...[...files].sort()], { cwd: staging })
+await copyFile(temporaryZip, target)
 const entries = execFileSync('unzip', ['-Z1', target], { encoding: 'utf8' }).trim().split('\n')
 assert.deepEqual(entries.sort(), [...files].sort())
 assert.equal(JSON.parse(execFileSync('unzip', ['-p', target, 'manifest.json'], { encoding: 'utf8' })).version, manifest.version)
 const digest = createHash('sha256').update(await readFile(target)).digest('hex')
 await writeFile(`${target}.sha256`, `${digest}  ${artifact}\n`)
+await writeFile(`${target}.metadata.json`, JSON.stringify({
+  candidateOnly: true, targetVersion: githubCandidate ? '1.0.0' : manifest.version,
+  manifestVersion: manifest.version, sha256: digest,
+  sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  files: entries, chromeManualQA: 'pending',
+}, null, 2) + '\n')
+await rm(staging, { recursive: true })
 console.log(`RC only; version is not promoted: ${manifest.version}\n${target}\nSHA-256 ${digest}\n${files.size} verified files; manifest at ZIP root`)

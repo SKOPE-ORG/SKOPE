@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "release:package": "npm run build && node scripts/package-release.mjs",
+    "release:github": "npm run build && node scripts/package-release.mjs --github-candidate",
     "test": "node --test tests/*.test.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",

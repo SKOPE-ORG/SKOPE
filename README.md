@@ -4,6 +4,29 @@ Release preparation: [RC checklist](docs/release/rc-checklist.md), [privacy poli
 
 SKOPE is an open-source Chrome extension for organizing browser tabs into workspaces. This release lets you create and manage local workspaces from Chrome's side panel.
 
+## 일반 사용자 설치 (GitHub Releases)
+
+이번 배포 대상은 **Chrome Extension**입니다. 독립형 SKOPE Browser는 포함하지 않습니다. 현재는 출시 준비 단계이며, 실제 Chrome QA와 승인 전에는 1.0.0 정식 릴리스를 게시하지 않습니다.
+
+1. [GitHub Releases](https://github.com/SKOPE-ORG/SKOPE/releases)에서 게시된 릴리스의 `SKOPE-Extension-v1.0.0.zip`과 SHA-256 파일을 다운로드합니다. 게시된 릴리스가 없다면 아직 일반 배포 전입니다.
+2. ZIP을 압축 해제한 뒤 폴더를 계속 보관할 위치(예: 문서 폴더의 `SKOPE-Extension`)로 옮깁니다. 폴더 바로 안에 `manifest.json`이 있어야 합니다.
+3. Chrome 주소창에 `chrome://extensions`를 입력하고 **개발자 모드**를 켭니다.
+4. **압축해제된 확장 프로그램을 로드**를 누르고 `manifest.json`이 들어 있는 폴더를 선택합니다. ZIP 자체를 선택하지 않습니다.
+5. Chrome 확장 프로그램 메뉴에서 SKOPE를 고정하고 아이콘을 눌러 Side Panel을 엽니다.
+
+Node.js나 개발 서버는 필요하지 않습니다. GitHub ZIP 방식은 수동 설치·업데이트이며 Chrome 웹 스토어 자동 업데이트를 제공하지 않습니다. 조직에서 개발자 모드가 차단된 브라우저에서는 설치가 불가능할 수 있습니다. [Chrome 공식 설치 안내](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world)를 참고하세요.
+
+## 업데이트와 Workspace 데이터 유지
+
+1. 기존 Chrome 프로필, 설치 폴더의 **정확한 경로**, `chrome://extensions`의 SKOPE 확장 ID를 기록합니다. 기존 설치 폴더를 백업합니다. 이 폴더 백업은 Workspace 데이터 백업이 아닙니다.
+2. 새 ZIP을 다른 임시 폴더에 풀고 내용을 확인합니다. SKOPE 패널을 닫고 확장 프로그램을 일시적으로 끈 다음, **기존 설치 폴더 경로를 유지한 채** 그 안의 배포 파일만 새 파일로 교체합니다. 기존 확장 프로그램을 **제거하지 마세요**.
+3. 확장 프로그램을 다시 켜고 `chrome://extensions`에서 SKOPE의 **새로고침**을 누릅니다. 처음과 다른 폴더에서 별도 설치하지 않습니다.
+4. 확장 ID가 이전과 같은지, Workspace 이름·아이콘·색상·순서·접힘 설정이 유지되는지 확인합니다. 문제가 있으면 편집·삭제를 멈추고 같은 경로에 이전 배포 파일을 복원한 뒤 다시 로드합니다.
+
+데이터는 설치 파일이 아닌 해당 Chrome 프로필의 확장 전용 `chrome.storage.local`에 저장됩니다. 제거하면 데이터가 삭제됩니다. 프로필·확장 ID가 달라진 설치나 향후 웹 스토어 설치로 데이터가 자동 이전되지는 않습니다. session 매핑은 다시 로드 시 초기화되므로 그룹 연결은 실제 그룹의 지문으로 재평가되며 일부 재배정이 필요할 수 있습니다. 실제 업데이트·재시작 보존 검사는 아직 미완료입니다. [Chrome 저장소 동작](https://developer.chrome.com/docs/extensions/reference/api/storage)을 참고하세요.
+
+문제가 발생하면 [Issues](https://github.com/SKOPE-ORG/SKOPE/issues)에 Chrome 버전, 운영체제, 설치 버전과 재현 방법을 알려 주세요. 개인 URL·Workspace 내용이나 토큰은 공개하지 마세요.
+
 ## Requirements
 
 - Node.js 22.12+ (required by Vite 8)
