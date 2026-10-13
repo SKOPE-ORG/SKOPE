@@ -8,7 +8,9 @@ import {
 import {
   activateChromeTab,
   createChromeTabGroup,
+  updateChromeTabGroupColor,
 } from './services/chromeTabGroups'
+import { getWorkspaceGroupColorUpdates, workspaceColorToChromeColor } from './services/workspaceGroupColors'
 import { resolveWorkspaceTabGroupLinks } from './services/workspaceTabGroups'
 import { useChromeTabGroups } from './hooks/useChromeTabGroups'
 import {
@@ -23,6 +25,7 @@ import {
   type ChromeTabGroupColor,
   type ChromeTabGroupSnapshot,
   type ChromeTabItem,
+  type TabGroupColorMode,
   type WorkspaceTabGroupLink,
 } from './types/tabGroup'
 
@@ -90,6 +93,11 @@ function App() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tabActionError, setTabActionError] = useState<string | null>(null)
+  const [colorSyncError, setColorSyncError] = useState<string | null>(null)
+  const [colorSyncAttempt, setColorSyncAttempt] = useState(0)
+  const colorSyncKey = useRef('')
+  const colorSyncPending = useRef(new Set<number>())
+  const colorSyncMounted = useRef(false)
   const fingerprintUpdateKey = useRef('')
 
   const refreshWorkspaces = useCallback(async () => {
@@ -245,6 +253,39 @@ function App() {
     [chromeGroups, workspaces, tabGroupLinks, groupBindings],
   )
 
+  const colorUpdates = useMemo(
+    () => getWorkspaceGroupColorUpdates(workspaces, tabGroupLinks, chromeGroups, resolvedGroupLinks),
+    [workspaces, tabGroupLinks, chromeGroups, resolvedGroupLinks],
+  )
+
+  useEffect(() => {
+    colorSyncMounted.current = true
+    return () => { colorSyncMounted.current = false }
+  }, [])
+
+  useEffect(() => {
+    if (!storageReady || groupsLoading || groupsError || saving) return
+    if (colorUpdates.length === 0) { colorSyncKey.current = ''; return }
+    const key = `${colorSyncAttempt}:` + colorUpdates.map((update) => `${update.groupId}:${update.linkId}:${update.color}`).sort().join('|')
+    if (colorSyncKey.current === key) return
+    const pending = colorUpdates.filter((update) => !colorSyncPending.current.has(update.groupId))
+    if (pending.length === 0) return
+    colorSyncKey.current = key
+    pending.forEach((update) => colorSyncPending.current.add(update.groupId))
+    void Promise.allSettled(pending.map((update) => updateChromeTabGroupColor(update.groupId, update.color)))
+      .then((results) => {
+        pending.forEach((update) => colorSyncPending.current.delete(update.groupId))
+        if (!colorSyncMounted.current) return
+        if (colorSyncKey.current === key) {
+          const failures = results.filter((result) => result.status === 'rejected')
+          setColorSyncError(failures.length > 0
+            ? `Workspace settings are saved, but ${failures.length} Chrome group color(s) could not be updated. Try again.`
+            : null)
+        }
+        void refreshGroups()
+      })
+  }, [colorUpdates, colorSyncAttempt, groupsError, groupsLoading, refreshGroups, saving, storageReady])
+
   useEffect(() => {
     if (!storageReady || groupsLoading || groupsError || saving) return
     const fingerprintUpdates = chromeGroups.flatMap((group) => {
@@ -274,7 +315,7 @@ function App() {
     })
   }, [chromeGroups, groupsError, groupsLoading, persistWorkspaceData, resolvedGroupLinks, saving, storageReady, tabGroupLinks, workspaces])
 
-  const assignTabGroup = async (group: ChromeTabGroupSnapshot, workspaceId: string) => {
+  const assignTabGroup = async (group: ChromeTabGroupSnapshot, workspaceId: string, colorMode: TabGroupColorMode) => {
     if (!workspaces.some((workspace) => workspace.id === workspaceId)) {
       throw new Error('That workspace no longer exists. Refresh and try again.')
     }
@@ -283,10 +324,11 @@ function App() {
     const existingLink = tabGroupLinks.find((link) => link.id === existingLinkId)
     const now = currentTimestamp()
     const link: WorkspaceTabGroupLink = existingLink
-      ? { ...existingLink, workspaceId, fingerprint: group.fingerprint, updatedAt: now }
+      ? { ...existingLink, workspaceId, colorMode, fingerprint: group.fingerprint, updatedAt: now }
       : {
           id: crypto.randomUUID(),
           workspaceId,
+          colorMode,
           fingerprint: group.fingerprint,
           createdAt: now,
           updatedAt: now,
@@ -295,8 +337,9 @@ function App() {
       ? tabGroupLinks.map((item) => item.id === link.id ? link : item)
       : [...tabGroupLinks, link]
     const nextWorkspaces = workspaces.map((workspace) => {
-      const tabGroupIds = workspace.tabGroupIds.filter((id) => id !== link.id)
-      if (workspace.id === workspaceId) tabGroupIds.push(link.id)
+      const tabGroupIds = workspace.id === workspaceId
+        ? workspace.tabGroupIds.includes(link.id) ? [...workspace.tabGroupIds] : [...workspace.tabGroupIds, link.id]
+        : workspace.tabGroupIds.filter((id) => id !== link.id)
       return tabGroupIds.length === workspace.tabGroupIds.length &&
         tabGroupIds.every((id, index) => id === workspace.tabGroupIds[index])
         ? workspace
@@ -349,7 +392,7 @@ function App() {
 
   const handleCreateAndAssignGroup = async (
     workspaceId: string,
-    input: { tabIds: number[]; title: string; color: ChromeTabGroupColor },
+    input: { tabIds: number[]; title: string; color: ChromeTabGroupColor; colorMode: TabGroupColorMode },
   ) => {
     if (chromeWindowId === null) throw new Error('Could not determine the current Chrome window.')
     let groupId: number
@@ -364,7 +407,7 @@ function App() {
     if (!createdGroup) {
       throw new Error('The Chrome group was created, but SKOPE could not read it yet. Refresh and add it again.')
     }
-    await assignTabGroup(createdGroup, workspaceId)
+    await assignTabGroup(createdGroup, workspaceId, input.colorMode)
   }
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId)
@@ -384,6 +427,12 @@ function App() {
     () => chromeGroups.filter((group) => !resolvedGroupLinks[String(group.id)]),
     [chromeGroups, resolvedGroupLinks],
   )
+  const groupColorModes = useMemo(() => Object.fromEntries(
+    chromeGroups.flatMap((group) => {
+      const link = tabGroupLinks.find((item) => item.id === resolvedGroupLinks[String(group.id)])
+      return link ? [[String(group.id), link.colorMode ?? 'chrome']] : []
+    }),
+  ) as Record<string, TabGroupColorMode>, [chromeGroups, resolvedGroupLinks, tabGroupLinks])
   const storageStatus = !isExtension
     ? 'PREVIEW'
     : loading
@@ -451,6 +500,14 @@ function App() {
           </div>
         )}
         {tabActionError && <div className="error-card" role="alert"><p>{tabActionError}</p></div>}
+        {colorSyncError && colorUpdates.length > 0 && (
+          <div className="error-card" role="alert">
+            <p>{colorSyncError}</p>
+            <button type="button" className="text-button" onClick={() => setColorSyncAttempt((current) => current + 1)}>
+              Retry group colors
+            </button>
+          </div>
+        )}
 
         <div className="workspace-list" aria-live="polite">
           {loading ? (
@@ -464,6 +521,7 @@ function App() {
                   key={workspace.id}
                   workspace={workspace}
                   groups={assignedGroupsByWorkspace.get(workspace.id) ?? []}
+                  colorModes={groupColorModes}
                   index={index}
                   total={workspaces.length}
                   active={workspace.id === activeWorkspaceId}
@@ -570,9 +628,10 @@ function App() {
             }),
           )}
           workspaceNamesById={Object.fromEntries(workspaces.map((workspace) => [workspace.id, workspace.name]))}
+          assignedColorModesByGroup={groupColorModes}
           onRetry={() => void refreshGroups()}
           onCancel={() => setDialog(null)}
-          onAssign={(group) => assignTabGroup(group, dialog.workspace.id)}
+          onAssign={(group, mode) => assignTabGroup(group, dialog.workspace.id, mode)}
           onCreate={(input) => handleCreateAndAssignGroup(dialog.workspace.id, input)}
         />
       ) : null}
@@ -583,6 +642,7 @@ function App() {
 interface WorkspaceRowProps {
   workspace: Workspace
   groups: ChromeTabGroupSnapshot[]
+  colorModes: Record<string, TabGroupColorMode>
   index: number
   total: number
   active: boolean
@@ -600,6 +660,7 @@ interface WorkspaceRowProps {
 function WorkspaceRow({
   workspace,
   groups,
+  colorModes,
   index,
   total,
   active,
@@ -662,6 +723,7 @@ function WorkspaceRow({
                 <TabGroupCard
                   key={`${group.windowId}-${group.id}`}
                   group={group}
+                  colorMode={colorModes[String(group.id)]}
                   onActivateTab={onActivateTab}
                   onRemove={() => onRemoveTabGroup(group)}
                 />
@@ -679,11 +741,12 @@ function WorkspaceRow({
 
 interface TabGroupCardProps {
   group: ChromeTabGroupSnapshot
+  colorMode?: TabGroupColorMode
   onActivateTab: (tab: ChromeTabItem) => void
   onRemove?: () => void
 }
 
-function TabGroupCard({ group, onActivateTab, onRemove }: TabGroupCardProps) {
+function TabGroupCard({ group, colorMode, onActivateTab, onRemove }: TabGroupCardProps) {
   const [expanded, setExpanded] = useState(false)
   const color = CHROME_TAB_GROUP_COLORS.find((choice) => choice.value === group.color)?.hex ?? '#7d8490'
   const title = group.title || 'Untitled group'
@@ -708,6 +771,7 @@ function TabGroupCard({ group, onActivateTab, onRemove }: TabGroupCardProps) {
           </button>
         )}
       </div>
+      {colorMode && <p className="group-color-policy">{colorMode === 'workspace' ? 'Follows Workspace color' : 'Keeps Chrome color'}</p>}
       {expanded && (
         <div className="tab-group-tabs">
           {group.tabs.map((tab) => (
@@ -742,13 +806,15 @@ interface AddTabGroupDialogProps {
   saving: boolean
   assignedWorkspaceIdsByGroup: Record<string, string>
   workspaceNamesById: Record<string, string>
+  assignedColorModesByGroup: Record<string, TabGroupColorMode>
   onRetry: () => void
   onCancel: () => void
-  onAssign: (group: ChromeTabGroupSnapshot) => Promise<void>
+  onAssign: (group: ChromeTabGroupSnapshot, colorMode: TabGroupColorMode) => Promise<void>
   onCreate: (input: {
     tabIds: number[]
     title: string
     color: ChromeTabGroupColor
+    colorMode: TabGroupColorMode
   }) => Promise<void>
 }
 
@@ -762,6 +828,7 @@ function AddTabGroupDialog({
   saving,
   assignedWorkspaceIdsByGroup,
   workspaceNamesById,
+  assignedColorModesByGroup,
   onRetry,
   onCancel,
   onAssign,
@@ -770,7 +837,9 @@ function AddTabGroupDialog({
   const dialogRef = useModalDialog()
   const [selectedTabIds, setSelectedTabIds] = useState<number[]>([])
   const [title, setTitle] = useState(`${workspace.name} group`)
-  const [color, setColor] = useState<ChromeTabGroupColor>('blue')
+  const [color, setColor] = useState<ChromeTabGroupColor>(workspaceColorToChromeColor(workspace.color))
+  const [newColorMode, setNewColorMode] = useState<TabGroupColorMode>('workspace')
+  const [existingColorMode, setExistingColorMode] = useState<TabGroupColorMode>('chrome')
   const [working, setWorking] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -787,7 +856,7 @@ function AddTabGroupDialog({
     setDialogError(null)
     setSuccess(null)
     try {
-      await onAssign(group)
+      await onAssign(group, existingColorMode)
       setSuccess(`“${group.title || 'Untitled group'}” is now in ${workspace.name}.`)
     } catch (assignError) {
       setDialogError(assignError instanceof Error ? assignError.message : 'Could not add this tab group.')
@@ -805,7 +874,11 @@ function AddTabGroupDialog({
     setDialogError(null)
     setSuccess(null)
     try {
-      await onCreate({ tabIds: selectedTabIds, title: trimmedTitle, color })
+      await onCreate({
+        tabIds: selectedTabIds, title: trimmedTitle,
+        color: newColorMode === 'workspace' ? workspaceColorToChromeColor(workspace.color) : color,
+        colorMode: newColorMode,
+      })
       setSelectedTabIds([])
       setSuccess(`“${trimmedTitle}” was created in Chrome and added to ${workspace.name}.`)
     } catch (createError) {
@@ -835,6 +908,18 @@ function AddTabGroupDialog({
           <h3 id="existing-groups-title">Current Chrome groups</h3>
           <span>{groups.length}</span>
         </div>
+        <label className="field-label" htmlFor="existing-group-color-mode">When adding or moving a group</label>
+        <select
+          id="existing-group-color-mode"
+          className="text-input color-mode-select"
+          value={existingColorMode}
+          disabled={isBusy}
+          onChange={(event) => setExistingColorMode(event.currentTarget.value as TabGroupColorMode)}
+        >
+          <option value="chrome">Keep current Chrome color</option>
+          <option value="workspace">Follow Workspace color</option>
+        </select>
+        <p className="color-policy-help">Existing colors change only when you choose Follow Workspace. Use Update to change an added group’s setting.</p>
         {error ? (
           <div className="error-card" role="alert">
             <p>{error}</p>
@@ -852,6 +937,7 @@ function AddTabGroupDialog({
                 ? workspaceNamesById[assignedWorkspaceId]
                 : undefined
               const alreadyHere = assignedWorkspaceId === workspace.id
+              const sameColorMode = (assignedColorModesByGroup[String(group.id)] ?? 'chrome') === existingColorMode
               return (
                 <div className="picker-group-row" key={`${group.windowId}-${group.id}`}>
                   <span
@@ -866,10 +952,10 @@ function AddTabGroupDialog({
                   <button
                     type="button"
                     className="picker-add-button"
-                    disabled={isBusy || alreadyHere}
+                    disabled={isBusy || (alreadyHere && sameColorMode)}
                     onClick={() => void handleAssign(group)}
                   >
-                    {alreadyHere ? 'Added' : assignedWorkspaceName ? 'Move here' : 'Add'}
+                    {alreadyHere ? sameColorMode ? 'Added' : 'Update' : assignedWorkspaceName ? 'Move here' : 'Add'}
                   </button>
                 </div>
               )
@@ -895,16 +981,31 @@ function AddTabGroupDialog({
 
         <fieldset className="choice-fieldset chrome-color-fieldset">
           <legend className="field-label">Chrome group color</legend>
+          <select
+            className="text-input color-mode-select"
+            aria-label="New group color behavior"
+            value={newColorMode}
+            disabled={isBusy}
+            onChange={(event) => setNewColorMode(event.currentTarget.value as TabGroupColorMode)}
+          >
+            <option value="workspace">Follow Workspace color</option>
+            <option value="chrome">Use a custom Chrome color</option>
+          </select>
+          <p className="color-policy-help">
+            Chrome uses 9 preset colors. This Workspace maps to {workspaceColorToChromeColor(workspace.color)}.
+            {newColorMode === 'workspace' ? ' Future Workspace color changes update this group.' : ' Your custom Chrome color will be preserved.'}
+          </p>
           <div className="color-choices">
             {CHROME_TAB_GROUP_COLORS.map((choice) => (
               <button
                 key={choice.value}
                 type="button"
-                className={`choice-color ${color === choice.value ? 'is-chosen' : ''}`}
+                className={`choice-color ${(newColorMode === 'workspace' ? workspaceColorToChromeColor(workspace.color) : color) === choice.value ? 'is-chosen' : ''}`}
                 style={{ '--choice-color': choice.hex } as CSSProperties}
                 aria-label={`${choice.name} Chrome group color`}
-                aria-pressed={color === choice.value}
-                onClick={() => setColor(choice.value)}
+                aria-pressed={(newColorMode === 'workspace' ? workspaceColorToChromeColor(workspace.color) : color) === choice.value}
+                disabled={isBusy}
+                onClick={() => { setColor(choice.value); setNewColorMode('chrome') }}
               />
             ))}
           </div>
@@ -1028,6 +1129,10 @@ function WorkspaceDialog({ workspace, saving, error, onCancel, onSave }: Workspa
             ))}
           </div>
         </fieldset>
+        <p className="color-policy-help">
+          Chrome uses preset colors; this color maps to {workspaceColorToChromeColor(color)}.
+          Only groups set to Follow Workspace update. Change each group’s setting in Add Tab Group.
+        </p>
 
         {error && <p className="dialog-error" role="alert">{error}</p>}
         <div className="dialog-actions">
